@@ -1,0 +1,15 @@
+version: '3.7'
+services:
+  s3uploader:
+    image: jessechahal/s3uploader:${TAG:-latest}
+    build:
+      context: .
+      labels:
+        description: "IT Glue post-interview project"
+        created-by: "Jesse Chahal"
+        creation-date: "June 2019"
+        #git_hash=git rev-parse --short HEAD
+    ports:
+      - "5000:5000"
+    volumes:
+      - ./web:/usr/src/app
