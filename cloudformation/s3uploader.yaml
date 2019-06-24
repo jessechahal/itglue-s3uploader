@@ -15,11 +15,11 @@ Parameters:
     Description: Select two public subnets within your selected VPC.
   DesiredCapacity:
     Type: Number
-    Default: '1'
+    Default: '2'
     Description: Number of instances to launch in your ECS cluster.
   MaxSize:
     Type: Number
-    Default: '2'
+    Default: '4'
     Description: Maximum number of instances that can be launched in your ECS cluster.
   InstanceType:
     Description: EC2 instance type
@@ -192,13 +192,16 @@ Resources:
     DependsOn: ALBHttpListener
     Properties:
       Cluster: !Ref 'ECSCluster'
-      DesiredCount: '1'
+      DesiredCount: !Ref 'DesiredCapacity'
       LoadBalancers:
-        - ContainerName: s3uploader-app
+        - ContainerName: s3uploader-appmv
           ContainerPort: '5000'
           TargetGroupArn: !Ref 'ECSTargetGroup'
       Role: !Ref 'ECSServiceRole'
       TaskDefinition: !Ref 'EcsTaskDefinition'
+      PlacementStrategies:
+        - Field: instanceId
+          Type: spread
   ECSServiceRole:
     Type: AWS::IAM::Role
     Properties:
