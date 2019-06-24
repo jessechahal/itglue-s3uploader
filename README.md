@@ -29,6 +29,7 @@ Implementation Notes
     - I had to do this as i didn't know IT Glues office IP address
     - I didn't use a bastion host since that is only needed for private EC2 instances
         - You can use ACL's + security groups to get the same level of security as bastion host for SSH into public EC2 VMs
+- EC2 instances are configured to run in multi-az. This is assuming that the 2 provided public subnets are in 2 different AZ's
 
 Running locally
 ---
