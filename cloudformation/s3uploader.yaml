@@ -194,7 +194,7 @@ Resources:
       Cluster: !Ref 'ECSCluster'
       DesiredCount: !Ref 'DesiredCapacity'
       LoadBalancers:
-        - ContainerName: s3uploader-appmv
+        - ContainerName: s3uploader-app
           ContainerPort: '5000'
           TargetGroupArn: !Ref 'ECSTargetGroup'
       Role: !Ref 'ECSServiceRole'
