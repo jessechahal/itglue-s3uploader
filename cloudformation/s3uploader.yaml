@@ -3,13 +3,16 @@ Description: "Launches s3 upload service into an existing VPC"
 Parameters:
   KeyName:
     Type: AWS::EC2::KeyPair::KeyName
+    Default: jesse_ssh
     Description: Name of an existing EC2 KeyPair to enable SSH access to the ECS instances.
   VpcId:
     Type: AWS::EC2::VPC::Id
+    Default: "vpc-0232f140611483873"
     Description: Select a VPC that allows instances access to the Internet.
   SubnetId:
     Type: List<AWS::EC2::Subnet::Id>
-    Description: Select at two subnets in your selected VPC.
+    Default: "subnet-009dd528099cd4191,subnet-0a9f74283211d817f"
+    Description: Select two public subnets within your selected VPC.
   DesiredCapacity:
     Type: Number
     Default: '1'
@@ -28,39 +31,21 @@ Parameters:
                     c3.2xlarge, c3.4xlarge, c3.8xlarge, r3.large, r3.xlarge, r3.2xlarge, r3.4xlarge,
                     r3.8xlarge, i2.xlarge, i2.2xlarge, i2.4xlarge, i2.8xlarge]
     ConstraintDescription: Please choose a valid instance type.
-    # TODO: remove below if not using
-    # got below from https://docs.aws.amazon.com/AmazonECS/latest/developerguide/retrieve-ecs-optimized_AMI.html
-    LatestAmiId:
-      Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
-      Default: '/aws/service/ecs/optimized-ami/amazon-linux-2/recommended'
-    S3UploaderDockerImage:
-      Type: 'String'
-      Default: 'jessechahal/itglue-s3uploader:latest'
-    S3BucketName:
-      Type: 'String'
-      Default: 'jessechahal-itglue-s3uploader-d84jsk349'
-Mappings:
-  #ECS optimized AMIs
-  AWSRegionToAMI:
-    us-east-1:
-      AMIID: ami-0dde61416371df99a
-    us-east-2:
-      AMIID: ami-068a784e5da70c400
-    us-west-1:
-      AMIID: ami-01b403cf431fecff5
-    us-west-2:
-      AMIID: ami-050274527f8727b52
-    eu-west-1:
-      AMIID: ami-0f43fe59461776205
-    eu-central-1:
-      AMIID: ami-075703041f2f591b9
-    ap-northeast-1:
-      AMIID: ami-088d9a38123ee2d21
-    ap-southeast-1:
-      AMIID: ami-0c8ef5b3cf8888930
-    ap-southeast-2:
-      AMIID: ami-096d467b43b2344ba
+  # TODO: remove below if not using
+  # got below from https://docs.aws.amazon.com/AmazonECS/latest/developerguide/retrieve-ecs-optimized_AMI.html
+  LatestAmiId:
+    Type: 'AWS::SSM::Parameter::Value<AWS::EC2::Image::Id>'
+    Default: '/aws/service/ecs/optimized-ami/amazon-linux-2/recommended/image_id'
+  S3UploaderDockerImage:
+    Type: 'String'
+    Default: 'jessechahal/itglue-s3uploader:latest'
 Resources:
+  S3Bucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Join ['', [!Ref 'AWS::StackName', -itglue-s3uploader]]
+      AccessControl: "PublicRead"
+
   ECSCluster:
     Type: AWS::ECS::Cluster
   EcsSecurityGroup:
@@ -97,7 +82,7 @@ Resources:
     Properties:
       LogGroupName: !Join ['-', [ECSLogGroup, !Ref 'AWS::StackName']]
       RetentionInDays: 14
-  taskdefinition:
+  EcsTaskDefinition:
     Type: AWS::ECS::TaskDefinition
     Properties:
       Family: !Join ['', [!Ref 'AWS::StackName', -ecs-s3uploader]]
@@ -107,47 +92,59 @@ Resources:
           Essential: 'true'
           Image: !Ref 'S3UploaderDockerImage'
           Memory: '300'
+          PortMappings:
+            - ContainerPort: 5000
+          Environment:
+            - Name: S3_BUCKET
+              Value: !Ref 'S3Bucket'
+            - Name: DEBUG
+              Value: "True"
+            - Name: LOG_LEVEL
+              Value: "DEBUG"
           LogConfiguration:
             LogDriver: awslogs
             Options:
               awslogs-group: !Ref 'CloudwatchLogsGroup'
               awslogs-region: !Ref 'AWS::Region'
               awslogs-stream-prefix: ecs-s3uploader
-          PortMappings:
-            - ContainerPort: 80
+          #Tmpfs:
+          #  ContainerPath: "/tmp"
+          #  MountOptions:
+          #    - "rw"
+            #Size: "1024"
   ECSALB:
     Type: AWS::ElasticLoadBalancingV2::LoadBalancer
     Properties:
-      Name: ECSALB
+      Name: !Join ['-', [ECSALB, !Ref 'AWS::StackName']]
       Scheme: internet-facing
       LoadBalancerAttributes:
         - Key: idle_timeout.timeout_seconds
           Value: '30'
       Subnets: !Ref 'SubnetId'
       SecurityGroups: [!Ref 'EcsSecurityGroup']
-  ALBListener:
+  ALBHttpListener:
     Type: AWS::ElasticLoadBalancingV2::Listener
     DependsOn: ECSServiceRole
     Properties:
       DefaultActions:
         - Type: forward
-          TargetGroupArn: !Ref 'ECSTG'
+          TargetGroupArn: !Ref 'ECSTargetGroup'
       LoadBalancerArn: !Ref 'ECSALB'
       Port: '80'
       Protocol: HTTP
   ECSALBListenerRule:
     Type: AWS::ElasticLoadBalancingV2::ListenerRule
-    DependsOn: ALBListener
+    DependsOn: ALBHttpListener
     Properties:
       Actions:
         - Type: forward
-          TargetGroupArn: !Ref 'ECSTG'
+          TargetGroupArn: !Ref 'ECSTargetGroup'
       Conditions:
         - Field: path-pattern
           Values: [/]
-      ListenerArn: !Ref 'ALBListener'
+      ListenerArn: !Ref 'ALBHttpListener'
       Priority: 1
-  ECSTG:
+  ECSTargetGroup:
     Type: AWS::ElasticLoadBalancingV2::TargetGroup
     DependsOn: ECSALB
     Properties:
@@ -156,7 +153,7 @@ Resources:
       HealthCheckProtocol: HTTP
       HealthCheckTimeoutSeconds: 5
       HealthyThresholdCount: 2
-      Name: ECSTG
+      Name: !Join ['-', [ECSTargetGroup, !Ref 'AWS::StackName']]
       Port: 80
       Protocol: HTTP
       UnhealthyThresholdCount: 2
@@ -178,7 +175,8 @@ Resources:
   ContainerInstances:
     Type: AWS::AutoScaling::LaunchConfiguration
     Properties:
-      ImageId: !FindInMap [AWSRegionToAMI, !Ref 'AWS::Region', AMIID]
+      #ImageId: !FindInMap [AWSRegionToAMI, !Ref 'AWS::Region', AMIID]
+      ImageId: !Ref 'LatestAmiId'
       SecurityGroups: [!Ref 'EcsSecurityGroup']
       InstanceType: !Ref 'InstanceType'
       IamInstanceProfile: !Ref 'EC2InstanceProfile'
@@ -189,18 +187,18 @@ Resources:
           echo ECS_CLUSTER=${ECSCluster} >> /etc/ecs/ecs.config
           yum install -y aws-cfn-bootstrap
           /opt/aws/bin/cfn-signal -e $? --stack ${AWS::StackName} --resource ECSAutoScalingGroup --region ${AWS::Region}
-  service:
+  EcsService:
     Type: AWS::ECS::Service
-    DependsOn: ALBListener
+    DependsOn: ALBHttpListener
     Properties:
       Cluster: !Ref 'ECSCluster'
       DesiredCount: '1'
       LoadBalancers:
         - ContainerName: s3uploader-app
-          ContainerPort: '80'
-          TargetGroupArn: !Ref 'ECSTG'
+          ContainerPort: '5000'
+          TargetGroupArn: !Ref 'ECSTargetGroup'
       Role: !Ref 'ECSServiceRole'
-      TaskDefinition: !Ref 'taskdefinition'
+      TaskDefinition: !Ref 'EcsTaskDefinition'
   ECSServiceRole:
     Type: AWS::IAM::Role
     Properties:
@@ -212,21 +210,22 @@ Resources:
             Action: ['sts:AssumeRole']
       Path: /
       Policies:
-        - PolicyName: ecs-service
+        - PolicyName: !Join ['-', [ecs-service, !Ref 'AWS::StackName']]
           PolicyDocument:
             Statement:
               - Effect: Allow
                 Action: ['elasticloadbalancing:DeregisterInstancesFromLoadBalancer', 'elasticloadbalancing:DeregisterTargets',
                          'elasticloadbalancing:Describe*', 'elasticloadbalancing:RegisterInstancesWithLoadBalancer',
-                         'elasticloadbalancing:RegisterTargets', 'ec2:Describe*', 'ec2:AuthorizeSecurityGroupIngress']
+                         'elasticloadbalancing:RegisterTargets', 'ec2:Describe*', 'ec2:AuthorizeSecurityGroupIngress',
+                         's3:PutObject', 's3:PutObjectAcl', 's3:GetBucketLocation']
                 Resource: '*'
   ServiceScalingTarget:
     Type: AWS::ApplicationAutoScaling::ScalableTarget
-    DependsOn: service
+    DependsOn: EcsService
     Properties:
       MaxCapacity: 2
       MinCapacity: 1
-      ResourceId: !Join ['', [service/, !Ref 'ECSCluster', /, !GetAtt [service, Name]]]
+      ResourceId: !Join ['', [service/, !Ref 'ECSCluster', /, !GetAtt [EcsService, Name]]]
       RoleARN: !GetAtt [AutoscalingRole, Arn]
       ScalableDimension: ecs:service:DesiredCount
       ServiceNamespace: ecs
@@ -277,7 +276,8 @@ Resources:
               - Effect: Allow
                 Action: ['ecs:CreateCluster', 'ecs:DeregisterContainerInstance', 'ecs:DiscoverPollEndpoint',
                          'ecs:Poll', 'ecs:RegisterContainerInstance', 'ecs:StartTelemetrySession',
-                         'ecs:Submit*', 'logs:CreateLogStream', 'logs:PutLogEvents']
+                         'ecs:Submit*', 'logs:CreateLogStream', 'logs:PutLogEvents',
+                         's3:PutObject', 's3:PutObjectAcl', 's3:GetBucketLocation']
                 Resource: '*'
   AutoscalingRole:
     Type: AWS::IAM::Role
@@ -304,14 +304,19 @@ Resources:
       Roles: [!Ref 'EC2Role']
 Outputs:
   ecsservice:
-    Value: !Ref 'service'
+    Value: !Ref 'EcsService'
   ecscluster:
     Value: !Ref 'ECSCluster'
   ECSALB:
-    Description: Your ALB DNS URL
+    Description: Your ALB DNS URL. Use this URL to call s3uploader
     Value: !Join ['', [!GetAtt [ECSALB, DNSName]]]
-  taskdef:
-    Value: !Ref 'taskdefinition'
+  S3Bucket:
+    Description: Name of unique s3bucket
+    Value: !Ref 'S3Bucket'
+
+  #S3BucketSecureURL:
+  #  Value:  !Join [ '', [ 'https://', [ !GetAtt [ 'S3Bucket', 'DomainName' ]]]]
+  #  Description: "Name of S3 bucket to hold uploaded file contents"
 
 
 ### PARAMETERS
