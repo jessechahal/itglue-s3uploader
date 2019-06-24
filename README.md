@@ -30,6 +30,12 @@ Implementation Notes
     - I didn't use a bastion host since that is only needed for private EC2 instances
         - You can use ACL's + security groups to get the same level of security as bastion host for SSH into public EC2 VMs
 - EC2 instances are configured to run in multi-az. This is assuming that the 2 provided public subnets are in 2 different AZ's
+- you cannot delete a cloudformation stack if the s3 bucket has items in it. Its just the way cloudformation works
+    - empty out the created s3 bucket before deleting a stack
+- logging is setup that well with my service. It was working fine when i was using flask has an application server but when i switched to a production ready
+server info and below logs stopped working correctly. I didn't have time to fix this but since all the INFO+DEBUG logs were created by me and were super simple
+I didn't focus too much on this
+    - error logs still show up in cloudwatch as expected
 
 Running locally
 ---
