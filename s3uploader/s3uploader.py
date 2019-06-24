@@ -96,33 +96,16 @@ def create_app(test_config=None):
             local_saved_filepath = os.path.join(temp_folder, unique_filename)
             uploaded_file.save(local_saved_filepath)
 
-            #s3_transfer = s3transfer(s3)
-            #s3_transfer.upload_fileobj(uploaded_file, app.config.S3_BUCKETNAME, unique_filename)
             s3.meta.client.upload_file(local_saved_filepath, S3_BUCKET, unique_filename)
             object_acl = s3.ObjectAcl(S3_BUCKET,unique_filename)
             object_acl.put(ACL='public-read')
-            #s3.upload_fileobj(uploaded_file, app.config.S3_BUCKETNAME, unique_filename)
-            '''
-            return redirect(url_for('uploaded_file',
-                                    filename=unique_filename))
-            '''
+
             bucket_location = s3.meta.client.get_bucket_location(Bucket=S3_BUCKET)
             object_url = "https://s3-{0}.amazonaws.com/{1}/{2}".format(
                 bucket_location['LocationConstraint'],
                 S3_BUCKET,
                 unique_filename)
             return Response(object_url, status=200, mimetype='application/text')
-            '''
-            with tempfile.NamedTemporaryFile(prefix="s3uploader_") as f:
-                logger.debug("About to write to temp file")
-                f.write(uploaded_file)
-                f.seek(0)
-                logger.debug("generated temp file on disk")
-                s3.upload_file(f, app.config.S3_BUCKETNAME, s3_filename)
-            logger.debug("generating s3 filename")
-            filename = generate_s3_filename(uploaded_file.filename) 
-            return filename
-            '''
 
         #s3.upload_file(Key, app.config.S3_BUCKETNAME, filename)
 
@@ -131,10 +114,12 @@ def create_app(test_config=None):
 
     @app.route("/healthcheck", methods=['GET'])
     def healthcheck():
-        # contact s3 bucket? upload file to s3 bucket?
-        # can write to tmpfs?
-        # TODO: currently a place holder
-        return Response("", status=200, mimetype='application/json')
+        bucket_location = s3.meta.client.get_bucket_location(Bucket=S3_BUCKET)
+        if bucket_location:
+            return Response("", status=200, mimetype='application/json')
+        else:
+            return Response("Couldn't reach s3 bucket", status=500, mimetype='application/text')
+
 
     return app
 
